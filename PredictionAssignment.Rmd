@@ -1,0 +1,105 @@
+
+# Practical Machine Learning - Course Project
+
+## Overview
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
+
+## Data cleaning and Feature selection
+```{r}
+set.seed(32)
+pmlData <- read.csv("pml-training.csv", header=TRUE)
+# Removing near zero variance predictors
+nzv <- nearZeroVar(pmlData)
+pmlData <- pmlData[, -nzv] 
+dim(pmlData)
+# Remove columns which has more than 80% NAs 
+NAratio <- colSums(is.na(pmlData))/nrow(pmlData)
+NAColumns <- which(NAratio > 0.80)
+pmlData <- pmlData[, -NAColumns] # remove columns which has 80% NAs
+dim(pmlData)
+```
+
+### Create two separate dataset one for all numeric columns and another for factors
+```{r}
+numericData <- pmlData[sapply(pmlData, is.numeric)] 
+factorData <- pmlData[sapply(pmlData, is.factor)]
+```
+
+### Identifying Correlated Predictors
+```{r}
+dataCor <-  cor(numericData) # create correlation matrix
+summary(dataCor[upper.tri(dataCor)])
+# calculate predictors which has correlation value more than 0.9
+highlyCorData <- findCorrelation(dataCor, cutoff = 0.90) 
+filteredData <- numericData[,-highlyCorData] # remove highly correleated predictors
+dataCor2 <- cor(filteredData)
+summary(dataCor2[upper.tri(dataCor2)])
+dim(filteredData)
+```
+
+Around 49 variables are highly correlated, so we removed them. 
+
+### Remove some more unrelevant variables 
+ As first 4 variables ("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "num_window") has no relevance, we remove these from the dataset.
+
+```{r}
+names(filteredData)
+finalData <- filteredData[,c(-1,-2,-3,-4)]
+# Also in factorData, only relevant feature is "classe", so we merge this variable to finalData 
+names(factorData)
+finalData <- data.frame(cbind(finalData,classe=factorData$classe))
+dim(finalData)
+filteredData <- NULL
+numericData <- NULL
+factorData <- NULL
+pmlData <- NULL
+```
+
+## Spliting dataset for training and cross-validation data 
+```{r}
+inTrain <- createDataPartition(y = finalData$classe, list = FALSE, p=0.7)
+trainData <- finalData[inTrain,]
+testData <- finalData[-inTrain,]
+```
+
+## Build a Predictive Model
+We use *train()* function from **caret** package for **random forest** model generation. 
+
+For training control, we use Bootstrap resampling method for 2 iterations 
+```{r}
+control <- trainControl(method = "boot", number = 2) # Here k =2
+```
+### We use Random Forest algorithm for Model creation
+```{r}
+library(caret)
+library(randomForest)
+# Train the data by random forest classification technique.
+model.forest <- train(classe~., trainData, method = "rf",  trControl = control) 
+model.forest
+```
+
+### Error estimation with cross validation
+First we do error estimate for training data.
+```{r}
+predTrain <- predict(model.forest,newdata=trainData)
+confusionMatrix(predTrain,trainData$classe)$table
+```
+
+Accuracy rate is 100% for training data.
+
+Now we check, out of sample error on the "testData" which was created from the original data by splitiing 70:30 ratio 
+```{r}
+predTest <- predict(model.forest, newdata = testData[,names(finalData)])
+confusionMatrix(predTest,testData$classe)
+```
+Based on the confusion matrix summary above, the model has out of sample accuracy rate is : 99%
+
+Total 37 has been misclassified out of 5885.  
+### Now we will predict on the given testing data
+```{r}
+test <- read.csv("pml-testing.csv", header=TRUE)
+answers <- predict(model.forest, newdata = test)
+answers
+```
